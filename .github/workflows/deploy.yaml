@@ -1,0 +1,44 @@
+---
+name: Deploy
+
+# yamllint disable-line rule:truthy
+on:
+  release:
+    types:
+      - published
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  ci:
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    uses: hassio-addons/workflows/.github/workflows/app-ci.yaml@c953d10f34dac22eb68c1cdedbbc4106a89bef88 # v3.0.1
+    with:
+      slug: hassio-addons/healthchecks
+
+  deploy:
+    needs: ci
+    permissions:
+      contents: read
+      packages: write
+    uses: hassio-addons/workflows/.github/workflows/app-deploy.yaml@c953d10f34dac22eb68c1cdedbbc4106a89bef88 # v3.0.1
+    with:
+      # The slug doubles as the ghcr image path, which is why it carries the
+      # repository prefix: ghcr.io/shawly/hassio-addons/healthchecks. The
+      # Repository Updater on the other side ignores the dispatch payload and
+      # reconciles every app in .apps.yml, so the prefix does not break it.
+      slug: hassio-addons/healthchecks
+      # The defaults name repositories that do not exist here, so the dispatch
+      # would 404. Everything publishes to the one repository.
+      repository: hassio-addons
+      repository_beta: hassio-addons
+      repository_edge: hassio-addons
+    secrets:
+      DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}

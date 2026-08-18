@@ -1,0 +1,58 @@
+---
+name: Healthchecks
+version: dev
+slug: healthchecks
+description: Self-hosted cron job and background task monitoring
+url: https://github.com/shawly/hassio-app-healthchecks
+startup: services
+ingress: true
+ingress_port: 1337
+init: false
+panel_icon: mdi:heart-pulse
+panel_title: Healthchecks
+arch:
+  - aarch64
+  - amd64
+map:
+  - ssl
+ports:
+  8000/tcp: 8000
+ports_description:
+  8000/tcp: Web interface and ping endpoint
+options:
+  log_level: info
+  site_name: Healthchecks
+  registration_open: false
+  allow_private_ips: true
+  db: sqlite
+  ssl: false
+  certfile: fullchain.pem
+  keyfile: privkey.pem
+  csrf_trusted_origins: []
+schema:
+  log_level: list(trace|debug|info|notice|warning|error|fatal)
+  site_root: url?
+  site_name: str
+  ingress_user: email?
+  registration_open: bool
+  allow_private_ips: bool
+  superuser_email: email?
+  superuser_password: password?
+  db: list(sqlite|postgres)
+  db_host: str?
+  db_port: port?
+  db_name: str?
+  db_user: str?
+  db_password: password?
+  smtp_host: str?
+  smtp_port: port?
+  smtp_user: str?
+  smtp_password: password?
+  smtp_tls: bool?
+  smtp_from: str?
+  smtpd_port: port?
+  csrf_trusted_origins:
+    - str
+  ssl: bool
+  certfile: str
+  keyfile: str

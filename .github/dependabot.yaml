@@ -1,0 +1,14 @@
+---
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: daily
+      time: "06:00"
+    # Let a release sit for a week before bumping to it. Also keeps zizmor's
+    # dependabot-cooldown audit quiet.
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies

@@ -1,0 +1,161 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Healthchecks
+# Builds the runtime environment and prepares the database
+# ==============================================================================
+readonly ENV_FILE="/var/run/healthchecks/env"
+declare -a origins=()
+declare host
+declare port
+declare scheme
+declare secret_key
+declare site_root
+
+# Writes one NAME=VALUE line, shell-quoted so passwords with spaces or quotes
+# survive being sourced by the service scripts.
+hc.env() {
+    printf '%s=%q\n' "${1}" "${2}" >> "${ENV_FILE}"
+}
+
+# Writes an app option straight through, if it has a value.
+hc.env.config() {
+    if bashio::config.has_value "${2}"; then
+        hc.env "${1}" "$(bashio::config "${2}")"
+    fi
+}
+
+mkdir -p /var/run/healthchecks
+: > "${ENV_FILE}"
+chmod 600 "${ENV_FILE}"
+
+# ------------------------------------------------------------------------------
+# Secret key, generated once and kept next to the data it protects
+# ------------------------------------------------------------------------------
+if ! bashio::fs.file_exists "/data/secret_key"; then
+    bashio::log.info "Generating a new Django secret key..."
+    head -c 48 /dev/urandom | base64 | tr -d '\n' > /data/secret_key
+    chmod 600 /data/secret_key
+fi
+secret_key=$(</data/secret_key)
+
+# ------------------------------------------------------------------------------
+# Site
+# ------------------------------------------------------------------------------
+# SITE_ROOT is what the ping URLs are built from, so it has to be an address
+# the monitored machines can reach - not the ingress URL.
+if bashio::config.has_value 'site_root'; then
+    site_root=$(bashio::config 'site_root')
+else
+    scheme="http"
+    if bashio::config.true 'ssl'; then
+        scheme="https"
+    fi
+    host=$(bashio::info.hostname)
+    port=$(bashio::addon.port 8000)
+    if bashio::var.is_empty "${port}"; then
+        port="8000"
+        bashio::log.warning \
+            "Port 8000 is not exposed and no site_root is set; ping URLs will" \
+            "point at a port nothing can reach. Set the site_root option or" \
+            "expose the port."
+    fi
+    site_root="${scheme}://${host}:${port}"
+fi
+bashio::log.info "Ping URLs will be built from ${site_root}"
+
+hc.env SECRET_KEY "${secret_key}"
+hc.env DEBUG "False"
+hc.env PYTHONUNBUFFERED "1"
+hc.env SITE_ROOT "${site_root}"
+hc.env HC_LOG_LEVEL "$(bashio::config 'log_level' 'info')"
+hc.env.config SITE_NAME 'site_name'
+
+if bashio::config.true 'registration_open'; then
+    hc.env REGISTRATION_OPEN "True"
+else
+    hc.env REGISTRATION_OPEN "False"
+fi
+
+if bashio::config.true 'allow_private_ips'; then
+    hc.env INTEGRATIONS_ALLOW_PRIVATE_IPS "True"
+else
+    hc.env INTEGRATIONS_ALLOW_PRIVATE_IPS "False"
+fi
+
+# Apprise is installed in the image, so the integration can be offered.
+hc.env APPRISE_ENABLED "True"
+
+if bashio::config.has_value 'csrf_trusted_origins'; then
+    for origin in $(bashio::config 'csrf_trusted_origins'); do
+        origins+=("${origin}")
+    done
+    hc.env HC_CSRF_TRUSTED_ORIGINS "$(IFS=,; echo "${origins[*]}")"
+fi
+
+# ------------------------------------------------------------------------------
+# Database
+# ------------------------------------------------------------------------------
+if bashio::config.equals 'db' 'postgres'; then
+    bashio::config.require 'db_host' "PostgreSQL needs a host"
+    hc.env DB "postgres"
+    hc.env.config DB_HOST 'db_host'
+    hc.env.config DB_PORT 'db_port'
+    hc.env.config DB_NAME 'db_name'
+    hc.env.config DB_USER 'db_user'
+    hc.env.config DB_PASSWORD 'db_password'
+else
+    hc.env DB_NAME "/data/healthchecks.sqlite"
+fi
+
+# ------------------------------------------------------------------------------
+# Outgoing and incoming mail
+# ------------------------------------------------------------------------------
+hc.env.config EMAIL_HOST 'smtp_host'
+hc.env.config EMAIL_PORT 'smtp_port'
+hc.env.config EMAIL_HOST_USER 'smtp_user'
+hc.env.config EMAIL_HOST_PASSWORD 'smtp_password'
+hc.env.config DEFAULT_FROM_EMAIL 'smtp_from'
+hc.env.config SMTPD_PORT 'smtpd_port'
+
+if bashio::config.has_value 'smtp_tls'; then
+    if bashio::config.true 'smtp_tls'; then
+        hc.env EMAIL_USE_TLS "True"
+    else
+        hc.env EMAIL_USE_TLS "False"
+    fi
+fi
+
+if ! bashio::config.has_value 'smtp_host'; then
+    bashio::log.notice \
+        "No SMTP server configured; email notifications and sign-in links" \
+        "will not be delivered."
+fi
+
+# ------------------------------------------------------------------------------
+# Schema and first account
+# ------------------------------------------------------------------------------
+set -a
+# shellcheck source=/dev/null
+source "${ENV_FILE}"
+set +a
+
+cd /opt/healthchecks || bashio::exit.nok "Could not change to the Healthchecks directory"
+
+bashio::log.info "Applying database migrations..."
+/opt/venv/bin/python manage.py migrate --noinput \
+    || bashio::exit.nok "Failed to apply database migrations"
+
+if bashio::config.has_value 'superuser_email' \
+    && bashio::config.has_value 'superuser_password'; then
+
+    if output=$(/opt/venv/bin/python manage.py createsuperuser \
+        --email "$(bashio::config 'superuser_email')" \
+        --password "$(bashio::config 'superuser_password')" 2>&1); then
+        bashio::log.info "Created the superuser account."
+    elif [[ "${output}" == *"is already taken"* ]]; then
+        bashio::log.debug "Superuser account already exists, leaving it alone."
+    else
+        bashio::log.warning "Could not create the superuser account: ${output}"
+    fi
+fi

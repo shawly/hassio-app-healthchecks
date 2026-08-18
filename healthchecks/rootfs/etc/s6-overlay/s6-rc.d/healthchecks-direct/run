@@ -1,0 +1,18 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Healthchecks
+# Runs the uWSGI instance that serves the mapped port at the root prefix
+# ==============================================================================
+set -a
+# shellcheck source=/dev/null
+source /var/run/healthchecks/env
+set +a
+
+# No HC_FORCE_SCRIPT_NAME here on purpose: this instance answers at "/", and
+# Django caches the script prefix into STATIC_URL on first access, so the two
+# prefixes cannot share a process.
+
+bashio::log.info "Starting Healthchecks (direct)..."
+
+exec /opt/venv/bin/uwsgi /etc/uwsgi/direct.ini

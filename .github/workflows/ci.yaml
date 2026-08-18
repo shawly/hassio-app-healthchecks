@@ -1,0 +1,22 @@
+---
+name: CI
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+  security-events: write
+
+jobs:
+  workflows:
+    uses: hassio-addons/workflows/.github/workflows/app-ci.yaml@c953d10f34dac22eb68c1cdedbbc4106a89bef88 # v3.0.1
+    with:
+      # Doubles as the ghcr image path: ghcr.io/shawly/hassio-addons/healthchecks
+      slug: hassio-addons/healthchecks

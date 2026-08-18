@@ -1,0 +1,14 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Healthchecks
+# Runs the NGINX daemon
+# ==============================================================================
+
+# The direct instance runs in cheap mode and only binds its socket once the
+# master is up, so wait for the ingress one, which always has workers.
+bashio::net.wait_for 8001 127.0.0.1 300
+
+bashio::log.info "Starting NGINX..."
+
+exec nginx

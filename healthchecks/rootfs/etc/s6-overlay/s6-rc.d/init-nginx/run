@@ -1,0 +1,58 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Healthchecks
+# Configures NGINX for ingress and, if the port is exposed, direct access
+# ==============================================================================
+declare certfile
+declare ingress_entry
+declare ingress_user
+declare keyfile
+declare port
+
+# The live configuration is generated from the templates on every start rather
+# than edited in place. A container restart reuses the filesystem, so anything
+# that renames or rewrites a file here has to survive being run twice.
+mkdir -p /etc/nginx/servers
+rm -f /etc/nginx/servers/*.conf
+
+# ------------------------------------------------------------------------------
+# Ingress
+# ------------------------------------------------------------------------------
+cp /etc/nginx/templates/ingress.conf /etc/nginx/servers/ingress.conf
+
+ingress_entry=$(bashio::addon.ingress_entry)
+sed -i "s#%%ingress_entry%%#${ingress_entry}#g" /etc/nginx/servers/ingress.conf
+
+# An empty header leaves Healthchecks on its normal password login. Setting it
+# swaps the authentication backend for the ingress instance only, which is why
+# the direct server block clears the header again.
+ingress_user='""'
+if bashio::config.has_value 'ingress_user'; then
+    ingress_user=$(bashio::config 'ingress_user')
+    bashio::log.info "Ingress requests will be signed in as ${ingress_user}"
+fi
+sed -i "s#%%ingress_user%%#${ingress_user}#g" /etc/nginx/servers/ingress.conf
+
+# ------------------------------------------------------------------------------
+# Direct port
+# ------------------------------------------------------------------------------
+port=$(bashio::addon.port 8000)
+if bashio::var.has_value "${port}"; then
+    bashio::config.require.ssl
+
+    if bashio::config.true 'ssl'; then
+        certfile=$(bashio::config 'certfile')
+        keyfile=$(bashio::config 'keyfile')
+
+        cp /etc/nginx/templates/direct-ssl.conf /etc/nginx/servers/direct.conf
+        sed -i "s#%%certfile%%#${certfile}#g" /etc/nginx/servers/direct.conf
+        sed -i "s#%%keyfile%%#${keyfile}#g" /etc/nginx/servers/direct.conf
+    else
+        cp /etc/nginx/templates/direct.conf /etc/nginx/servers/direct.conf
+    fi
+else
+    bashio::log.notice \
+        "Port 8000 is not exposed; the web interface is reachable through" \
+        "ingress only, and nothing can send pings to this instance."
+fi

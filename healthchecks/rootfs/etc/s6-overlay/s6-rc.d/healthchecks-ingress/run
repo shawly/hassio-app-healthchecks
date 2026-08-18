@@ -1,0 +1,24 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Healthchecks
+# Runs the uWSGI instance that serves the Home Assistant ingress prefix
+# ==============================================================================
+set -a
+# shellcheck source=/dev/null
+source /var/run/healthchecks/env
+set +a
+
+# Django turns this into FORCE_SCRIPT_NAME, so reverse() prefixes every
+# generated URL with the ingress path. nginx strips the same prefix off the
+# incoming request.
+HC_FORCE_SCRIPT_NAME=$(bashio::addon.ingress_entry)
+export HC_FORCE_SCRIPT_NAME
+
+if bashio::config.has_value 'ingress_user'; then
+    export REMOTE_USER_HEADER="HTTP_X_AUTHENTICATED_USER"
+fi
+
+bashio::log.info "Starting Healthchecks (ingress)..."
+
+exec /opt/venv/bin/uwsgi /etc/uwsgi/ingress.ini
