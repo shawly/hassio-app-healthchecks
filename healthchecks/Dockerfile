@@ -49,6 +49,12 @@ RUN \
         /tmp/* \
         /root/.cache
 
+# Patch the upstream source. See the script for what and why.
+COPY patches /tmp/patches
+RUN \
+    /opt/venv/bin/python /tmp/patches/absolute-url-script-name.py \
+    && rm -fr /tmp/patches
+
 # Copy root filesystem
 COPY rootfs /
 

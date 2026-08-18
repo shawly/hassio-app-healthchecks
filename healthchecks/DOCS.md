@@ -149,11 +149,20 @@ sent twice.
 django-compressor is switched off for the same reason - its offline manifest
 bakes in a single fixed prefix at build time. Assets are served unminified.
 
+One upstream file is patched at build time,
+[`patches/absolute-url-script-name.py`][patch]. Healthchecks builds absolute
+URLs as `SITE_ROOT` plus a reversed path, and the reversed path carries the
+ingress prefix, so status badges, e-mail links and OAuth redirect URIs came
+out as the mapped port glued to an ingress-only path, with the ingress token
+in the middle of them. The patch takes the prefix back off. It fails the build
+if Healthchecks rewrites that function, rather than quietly doing nothing.
+
 ## Support
 
 Open an issue on [the app repository][issues]. For questions about
 Healthchecks itself, see the [Healthchecks documentation][healthchecks-docs].
 
 [healthchecks]: https://github.com/healthchecks/healthchecks
+[patch]: https://github.com/shawly/hassio-app-healthchecks/blob/main/healthchecks/patches/absolute-url-script-name.py
 [healthchecks-docs]: https://healthchecks.io/docs/
 [issues]: https://github.com/shawly/hassio-app-healthchecks/issues

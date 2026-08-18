@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+
+- Fix status badge URLs, e-mail links and OAuth redirect URIs generated from
+  the ingress interface. They carried the `/api/hassio_ingress/<token>` prefix
+  on top of the mapped port's address, which is not a URL that resolves
+  anywhere, and put the ingress token in anything a badge was pasted into.
+
 ## 1.0.1
 
 - Fix the ingress panel returning an nginx 404. Home Assistant removes the

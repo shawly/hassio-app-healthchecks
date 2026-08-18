@@ -274,6 +274,28 @@ profile=$(curl -fsSL -b "${cookies}" "${ingress_url}/accounts/profile/" \
 assert::contains "the superuser from the app options can sign in" \
     "${profile}" "${SUPERUSER_EMAIL}"
 
+# Absolute URLs - status badges, e-mail links, the logo handed to Slack - are
+# SITE_ROOT + reverse(), and reverse() carries the ingress prefix. They have to
+# come out pointing at the mapped port at its root, without the ingress token,
+# or a badge pasted into a README is both broken and a token leak.
+# The entry point lists the projects; the badges page hangs off one of them.
+project_code=$(curl -fsSL -b "${cookies}" "${ingress_url}/" \
+    | grep -o "projects/[0-9a-f-]\{36\}/" | head -1 | cut -d/ -f2 || true)
+
+if [[ -n "${project_code}" ]]; then
+    badges_html=$(curl -fsSL -b "${cookies}" \
+        "${ingress_url}/projects/${project_code}/badges/" || echo "")
+    assert::contains "badge URLs point at the mapped port at its root" \
+        "${badges_html}" "${direct_url}/badge/"
+    assert::not_contains "badge URLs do not carry the ingress prefix" \
+        "${badges_html}" "${direct_url}${INGRESS_ENTRY}"
+else
+    assert::fail "badge URLs point at the mapped port at its root" \
+        "no project link in the signed-in HTML"
+    assert::fail "badge URLs do not carry the ingress prefix" \
+        "no project link in the signed-in HTML"
+fi
+
 # ------------------------------------------------------------------------------
 # Pings, the reason the direct port exists at all
 # ------------------------------------------------------------------------------
