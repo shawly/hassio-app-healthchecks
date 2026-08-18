@@ -5,7 +5,6 @@
 # Configures NGINX for ingress and, if the port is exposed, direct access
 # ==============================================================================
 declare certfile
-declare ingress_entry
 declare ingress_user
 declare keyfile
 declare port
@@ -20,9 +19,6 @@ rm -f /etc/nginx/servers/*.conf
 # Ingress
 # ------------------------------------------------------------------------------
 cp /etc/nginx/templates/ingress.conf /etc/nginx/servers/ingress.conf
-
-ingress_entry=$(bashio::addon.ingress_entry)
-sed -i "s#%%ingress_entry%%#${ingress_entry}#g" /etc/nginx/servers/ingress.conf
 
 # An empty header leaves Healthchecks on its normal password login. Setting it
 # swaps the authentication backend for the ingress instance only, which is why

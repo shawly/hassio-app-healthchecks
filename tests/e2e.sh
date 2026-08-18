@@ -13,11 +13,9 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 readonly IMAGE="local/hassio-addon-healthchecks:test"
-readonly IMAGE_CURL="curlimages/curl:8.18.0"
 readonly NETWORK="healthchecks-addon-test"
 readonly SUPERVISOR="healthchecks-test-supervisor"
 readonly ADDON="healthchecks-test-addon"
-readonly CLIENT="healthchecks-test-client"
 # The Supervisor always proxies ingress from this address, and nginx only
 # accepts ingress requests from it. Recreating that here keeps the deny rule
 # under test instead of working around it.
@@ -28,6 +26,7 @@ readonly SUPERVISOR_IP="172.30.32.2"
 readonly SUPERVISOR_POOL="172.30.32.128/25"
 readonly INGRESS_ENTRY="/api/hassio_ingress/testtoken"
 readonly INGRESS_PORT=11337
+readonly SUPERVISOR_PORT=11080
 readonly DIRECT_PORT=18000
 readonly SUPERVISOR_TOKEN="test-supervisor-token"
 readonly SUPERUSER_EMAIL="e2e@example.com"
@@ -57,7 +56,7 @@ cleanup() {
         log::info "leaving containers up (--keep)"
         return
     fi
-    docker rm -f "${ADDON}" "${SUPERVISOR}" "${CLIENT}" > /dev/null 2>&1 || true
+    docker rm -f "${ADDON}" "${SUPERVISOR}" > /dev/null 2>&1 || true
     docker network rm "${NETWORK}" > /dev/null 2>&1 || true
     [[ -n "${DATA_DIR}" ]] && rm -rf "${DATA_DIR}"
     return 0
@@ -91,7 +90,7 @@ fi
 # Boot
 # ------------------------------------------------------------------------------
 log::step "Starting the app against a mock Supervisor"
-docker rm -f "${ADDON}" "${SUPERVISOR}" "${CLIENT}" > /dev/null 2>&1 || true
+docker rm -f "${ADDON}" "${SUPERVISOR}" > /dev/null 2>&1 || true
 docker network rm "${NETWORK}" > /dev/null 2>&1 || true
 docker network create --subnet "${SUPERVISOR_SUBNET}" \
     --ip-range "${SUPERVISOR_POOL}" "${NETWORK}" > /dev/null
@@ -118,30 +117,23 @@ options=$(jq -nc \
         keyfile: "privkey.pem"
     }')
 
+# The mock answers the Supervisor API and proxies ingress, from the address
+# the real Supervisor proxies from, so the deny rule stays under test.
 docker run -d --name "${SUPERVISOR}" \
-    --network "${NETWORK}" --network-alias supervisor \
+    --network "${NETWORK}" --network-alias supervisor --ip "${SUPERVISOR_IP}" \
     -v "${PWD}/tests/mock-supervisor.py:/mock-supervisor.py:ro" \
     -e INGRESS_ENTRY="${INGRESS_ENTRY}" \
     -e ADDON_OPTIONS="${options}" \
     -e PORT_8000="8000" \
+    -e ADDON_HOST="addon" \
+    -p "127.0.0.1:${SUPERVISOR_PORT}:80" \
     python:3.13-alpine python /mock-supervisor.py > /dev/null
-
-# Stands in for the Supervisor's ingress proxy: same network, same source IP.
-docker run -d --name "${CLIENT}" \
-    --network "${NETWORK}" --ip "${SUPERVISOR_IP}" \
-    --entrypoint sleep "${IMAGE_CURL}" infinity > /dev/null
-
-# Every ingress request has to come from the Supervisor address, so it goes
-# through the client container rather than the published port.
-ingress_curl() {
-    docker exec "${CLIENT}" curl "$@"
-}
 
 # bashio queries the Supervisor before the app has served a single request,
 # so the mock has to be answering before the app starts.
 supervisor_ready=false
 for _ in $(seq 1 30); do
-    if ingress_curl -fsS -o /dev/null "http://supervisor/supervisor/ping" \
+    if curl -fsS -o /dev/null "http://localhost:${SUPERVISOR_PORT}/supervisor/ping" \
         2> /dev/null; then
         supervisor_ready=true
         break
@@ -161,7 +153,7 @@ docker run -d --name "${ADDON}" \
 log::info "waiting for the app to come up"
 ready=false
 for _ in $(seq 1 90); do
-    if ingress_curl -fsS -o /dev/null "http://addon:1337${INGRESS_ENTRY}/" \
+    if curl -fsS -o /dev/null "http://localhost:${SUPERVISOR_PORT}${INGRESS_ENTRY}/" \
         2> /dev/null; then
         ready=true
         break
@@ -180,7 +172,10 @@ else
     exit 1
 fi
 
-ingress_url="http://addon:1337${INGRESS_ENTRY}"
+# Everything below goes through the mock Supervisor, exactly as a browser
+# would: it is the piece that removes the ingress prefix before the app sees
+# the request, and it is the only source address nginx accepts ingress from.
+ingress_url="http://localhost:${SUPERVISOR_PORT}${INGRESS_ENTRY}"
 direct_url="http://localhost:${DIRECT_PORT}"
 
 # ------------------------------------------------------------------------------
@@ -188,7 +183,7 @@ direct_url="http://localhost:${DIRECT_PORT}"
 # ------------------------------------------------------------------------------
 log::step "Ingress entrance"
 
-ingress_html=$(ingress_curl -fsSL "${ingress_url}/")
+ingress_html=$(curl -fsSL "${ingress_url}/")
 assert::contains "ingress serves the sign-in page" "${ingress_html}" "csrfmiddlewaretoken"
 
 # The whole reason this app runs two uWSGI instances. If both entrances
@@ -201,27 +196,28 @@ assert::not_contains "ingress asset URLs are not root-absolute" \
 css_path=$(grep -o "${INGRESS_ENTRY}/static/[^\"']*\.css" <<< "${ingress_html}" \
     | head -1)
 if [[ -n "${css_path}" ]]; then
-    css_type=$(ingress_curl -fsS -o /dev/null -w '%{content_type}' \
-        "http://addon:1337${css_path}" || echo "")
+    css_type=$(curl -fsS -o /dev/null -w '%{content_type}' \
+        "http://localhost:${SUPERVISOR_PORT}${css_path}" || echo "")
     assert::contains "ingress stylesheet is served" "${css_type}" "text/css"
 else
     assert::fail "ingress stylesheet is served" "no stylesheet link in the HTML"
 fi
 
-xfo=$(ingress_curl -fsSL -o /dev/null -D - "${ingress_url}/accounts/login/" | grep -i "^x-frame-options:" \
+xfo=$(curl -fsSL -o /dev/null -D - "${ingress_url}/accounts/login/" | grep -i "^x-frame-options:" \
     | tr -d '\r' | awk '{print $2}')
 assert::equals "ingress allows the Home Assistant iframe" "SAMEORIGIN" "${xfo}"
 
-redirect=$(ingress_curl -s -o /dev/null -w '%{http_code}' \
-    "http://addon:1337${INGRESS_ENTRY}")
-assert::equals "ingress entry without a trailing slash redirects" "301" "${redirect}"
-
-off_prefix=$(ingress_curl -s -o /dev/null -w '%{http_code}' "http://addon:1337/")
-assert::equals "ingress port serves nothing outside its prefix" "404" "${off_prefix}"
+# Serving the ingress port at the prefix rather than at the root is the one
+# mistake that turns the sidebar panel into a plain nginx 404, so pin it down
+# at both the entry point and one level in.
+for probe in "" "/accounts/login/"; do
+    code=$(curl -sL -o /dev/null -w '%{http_code}' "${ingress_url}${probe}")
+    assert::equals "ingress answers at '${probe:-<entry point>}'" "200" "${code}"
+done
 
 # The published port reaches nginx from the bridge gateway, not the Supervisor.
 denied=$(curl -s -o /dev/null -w '%{http_code}' \
-    "http://localhost:${INGRESS_PORT}${INGRESS_ENTRY}/")
+    "http://localhost:${INGRESS_PORT}/")
 assert::equals "ingress rejects requests from anywhere but the Supervisor" \
     "403" "${denied}"
 
@@ -252,17 +248,17 @@ fi
 log::step "Sign in through ingress"
 
 cookies="/tmp/cookies.txt"
-csrf=$(ingress_curl -fsS -c "${cookies}" "${ingress_url}/accounts/login/" \
+csrf=$(curl -fsS -c "${cookies}" "${ingress_url}/accounts/login/" \
     | grep -o 'name="csrfmiddlewaretoken" value="[^"]*"' \
     | head -1 | cut -d'"' -f4)
 
 # X-Forwarded-Proto says https while nginx and Django speak plain HTTP, which is
 # the shape of a real ingress request. Without SECURE_PROXY_SSL_HEADER, Django
 # compares the Origin against http://<host> and rejects this with a 403.
-login_code=$(ingress_curl -s -o /dev/null -w '%{http_code}' \
+login_code=$(curl -s -o /dev/null -w '%{http_code}' \
     -b "${cookies}" -c "${cookies}" \
-    -H "Origin: https://addon:1337" \
-    -H "Referer: https://addon:1337${INGRESS_ENTRY}/accounts/login/" \
+    -H "Origin: https://localhost:${SUPERVISOR_PORT}" \
+    -H "Referer: https://localhost:${SUPERVISOR_PORT}${INGRESS_ENTRY}/accounts/login/" \
     -H "X-Forwarded-Proto: https" \
     -H "X-Forwarded-For: 172.30.32.2" \
     --data-urlencode "csrfmiddlewaretoken=${csrf}" \
@@ -273,7 +269,7 @@ login_code=$(ingress_curl -s -o /dev/null -w '%{http_code}' \
 assert::not_contains "an HTTPS-origin POST is not rejected by the CSRF check" \
     "${login_code}" "403"
 
-profile=$(ingress_curl -fsSL -b "${cookies}" "${ingress_url}/accounts/profile/" \
+profile=$(curl -fsSL -b "${cookies}" "${ingress_url}/accounts/profile/" \
     || echo "")
 assert::contains "the superuser from the app options can sign in" \
     "${profile}" "${SUPERUSER_EMAIL}"

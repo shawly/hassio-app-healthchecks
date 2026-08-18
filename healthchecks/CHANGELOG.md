@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1
+
+- Fix the ingress panel returning an nginx 404. Home Assistant removes the
+  `/api/hassio_ingress/<token>` prefix before it forwards a request, so the
+  ingress server block now serves the app at the root instead of at that
+  prefix. The mock Supervisor in the test suite strips the prefix too, which
+  it did not before, and that is why the tests passed on a broken build.
+
 ## 1.0.0
 
 Initial release, packaging Healthchecks v4.3.
