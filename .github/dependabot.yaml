@@ -10,5 +10,9 @@ updates:
     # dependabot-cooldown audit quiet.
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
     labels:
       - dependencies
