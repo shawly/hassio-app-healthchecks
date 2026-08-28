@@ -10,21 +10,23 @@ ARG HEALTHCHECKS_VERSION="4.3"
 ARG UWSGI_VERSION="2.0.31"
 ARG APPRISE_VERSION="1.12.0"
 RUN \
-    apk add --no-cache --virtual .build-dependencies \
+    apk add --no-cache \
+        libcrypto3=3.5.8-r0 \
+        libpq=18.6-r0 \
+        libssl3=3.5.8-r0 \
+        nginx=1.30.4-r1 \
+        python3=3.14.7-r1 \
+    \
+    && apk add --no-cache --virtual .build-dependencies \
         build-base=0.5-r4 \
         curl-dev=8.21.0-r0 \
         libffi-dev=3.5.2-r1 \
         libpq-dev=18.6-r0 \
         linux-headers=7.0.0-r1 \
-        openssl-dev=3.5.7-r0 \
+        openssl-dev=3.5.8-r0 \
         pcre2-dev=10.47-r1 \
         py3-pip=26.1.2-r0 \
         python3-dev=3.14.7-r1 \
-    \
-    && apk add --no-cache \
-        libpq=18.6-r0 \
-        nginx=1.30.4-r1 \
-        python3=3.14.7-r1 \
     \
     && mkdir -p /opt/healthchecks \
     && curl -L -s "https://github.com/healthchecks/healthchecks/archive/refs/tags/v${HEALTHCHECKS_VERSION}.tar.gz" \
