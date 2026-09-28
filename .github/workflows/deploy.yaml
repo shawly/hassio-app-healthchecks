@@ -9,6 +9,10 @@ on:
   push:
     branches:
       - main
+  # Resolves a bumped app-deploy ref and its inputs before merge; deploy is skipped.
+  pull_request:
+    paths:
+      - .github/workflows/deploy.yaml
 
 permissions: {}
 
@@ -24,6 +28,7 @@ jobs:
       slug: hassio-addons/healthchecks
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: ci
     permissions:
       contents: read
